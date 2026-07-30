@@ -118,6 +118,50 @@ Additionally, we have updated the README.md file in the `performance_analysis` d
 
 To get started with the performance analysis feature, please refer to the [common/performance_analysis/README.md](common/performance_analysis/README.md) file for instructions and examples.
 
+## Multiple Client Secrets — Performance Test Branches
+
+The multiple-client-secrets performance evaluation is split into one Git branch per run, so
+Jenkins can be pointed at a single branch for each measurement. Every branch shares the same
+trimmed scenario and Jenkins flags; branches differ only in the IS `deployment.toml` config and
+the secret data they set up.
+
+**Common to every run**
+
+- **Scenario:** `00-oauth_client_credential_grant` only, **non-tenant**. The JMeter plan issues each
+  `/token` request against a **randomly selected app** from the created population (`noOfSPs`), so
+  load is spread uniformly across all apps.
+- **Concurrency / mode (Jenkins flags):** `-r 50-500 -v FULL` → 50, 100, 150, 300, 500 users.
+  (Must be `FULL`; `QUICK` ignores `-r` and forces a single 200-user point.)
+- **App population:** 1000. `AppInfoCache` default capacity is 10000 with no TTL, so a 1000-app
+  population is **fully warm (no eviction)**. "Miss" branches force eviction by lowering
+  `AppInfoCache` capacity below the population in `deployment.toml`.
+
+**Branch matrix**
+
+| Branch | Run | Pack | Feature flag | Persistence | Secrets/app | Cache state | Measures |
+|---|---|---|---|---|---|---|---|
+| `master_mcs` | Baseline | raw (no feature) | — | plaintext | 1 | warm | Raw-pack reference |
+| `mcs-perf/c1-r1-off` | C1-R1 | feature | OFF | plaintext | 1 | warm | Feature code present, flag off |
+| `mcs-perf/c1-r2-on-1sec` | C1-R2 | feature | ON | plaintext | 1 | warm | Enable-by-default, single secret |
+| `mcs-perf/c1-r3-on-4sec` | C1-R3 | feature | ON | plaintext | 4 | warm | Multiple secrets, warm |
+| `mcs-perf/c2-r1-plain-hit` | C2-R1 | feature | ON | encryption (plaintext cache) | 4 | warm / HIT | Warm-path, plaintext cache |
+| `mcs-perf/c2-r2-plain-miss-1` | C2-R2 | feature | ON | encryption (plaintext cache) | 1 | MISS | Encryption miss, single (decrypt) |
+| `mcs-perf/c2-r3-plain-miss-4` | C2-R3 | feature | ON | encryption (plaintext cache) | 4 | MISS | Encryption miss, multi (O(N) decrypt) |
+| `mcs-perf/c2-r4-hash-hit` | C2-R4 | feature | ON | hashing | 4 | warm / HIT | Warm-path, hashing |
+| `mcs-perf/c2-r5-hash-miss` | C2-R5 | feature | ON | hashing | 4 | MISS | Hashing miss (indexed O(1)) |
+
+**Config levers each branch sets (in `deployment.toml` / data setup)**
+
+- **Feature flag:** `oauth.multiple_client_secrets.enable` (and `secret_count`).
+- **Persistence mode:** plaintext (raw-pack default, used for the baseline and Category 1),
+  encryption, or client-secret hashing (Category 2).
+- **Secrets per app:** seed 1 or 4 secrets per app during data setup.
+- **Cache state:** `AppInfoCache` capacity/timeout — *warm* = default (capacity 10000, no TTL);
+  *miss* = capacity set below the 1000-app population to force eviction.
+
+> Status: `master_mcs` (baseline, scenario trimmed) is ready. The `mcs-perf/*` branches are created
+> off `master_mcs`, each applying only its own `deployment.toml` / data-setup changes from the table.
+
 ## Legacy Mode
 
 If needed to run the performance test in legacy mode, please use the legacy-mode branch.
