@@ -120,10 +120,16 @@ To get started with the performance analysis feature, please refer to the [commo
 
 ## Multiple Client Secrets — Performance Test Branches
 
-The multiple-client-secrets performance evaluation is split into one Git branch per run, so
-Jenkins can be pointed at a single branch for each measurement. Every branch shares the same
-trimmed scenario and Jenkins flags; branches differ only in the IS `deployment.toml` config and
-the secret data they set up.
+Each measurement is a combination of a **product pack** (feature binaries + feature flag) and a
+**harness branch** (seeded data + cache config). Branches carry only what a pack cannot: runtime
+data seeding and the harness-applied `deployment.toml`.
+
+**Important: the harness replaces the pack's `deployment.toml`.** The setup
+(`common/deployment/setup/update-is-conf.sh`) copies `setup/resources/deployment.toml` over
+`repository/conf/deployment.toml`, so config baked into a pack's toml is discarded. A pack must
+carry its condition in `repository/resources/conf/default.json` instead (the defaults layer that
+applies when the harness toml omits a key). The harness toml deliberately sets no
+`[oauth.multiple_client_secrets]` keys.
 
 **Common to every run**
 
@@ -132,35 +138,38 @@ the secret data they set up.
   load is spread uniformly across all apps.
 - **Concurrency / mode (Jenkins flags):** `-r 50-500 -v FULL` → 50, 100, 150, 300, 500 users.
   (Must be `FULL`; `QUICK` ignores `-r` and forces a single 200-user point.)
-- **App population:** 1000. `AppInfoCache` default capacity is 10000 with no TTL, so a 1000-app
-  population is **fully warm (no eviction)**. "Miss" branches force eviction by lowering
-  `AppInfoCache` capacity below the population in `deployment.toml`.
+- **App population:** 1000, each created with 1 secret via `TestData_Add_OAuth_Apps.jmx`
+  (`consumerKey_<n>` / `consumerSecret_<n>`).
 
-**Branch matrix**
+**Harness branches**
 
-| Branch | Run | Pack | Feature flag | Persistence | Secrets/app | Cache state | Measures |
-|---|---|---|---|---|---|---|---|
-| `master_mcs` | Baseline | raw (no feature) | — | plaintext | 1 | warm | Raw-pack reference |
-| `mcs-perf/c1-r1-off` | C1-R1 | feature | OFF | plaintext | 1 | warm | Feature code present, flag off |
-| `mcs-perf/c1-r2-on-1sec` | C1-R2 | feature | ON | plaintext | 1 | warm | Enable-by-default, single secret |
-| `mcs-perf/c1-r3-on-4sec` | C1-R3 | feature | ON | plaintext | 4 | warm | Multiple secrets, warm |
-| `mcs-perf/c2-r1-plain-hit` | C2-R1 | feature | ON | encryption (plaintext cache) | 4 | warm / HIT | Warm-path, plaintext cache |
-| `mcs-perf/c2-r2-plain-miss-1` | C2-R2 | feature | ON | encryption (plaintext cache) | 1 | MISS | Encryption miss, single (decrypt) |
-| `mcs-perf/c2-r3-plain-miss-4` | C2-R3 | feature | ON | encryption (plaintext cache) | 4 | MISS | Encryption miss, multi (O(N) decrypt) |
-| `mcs-perf/c2-r4-hash-hit` | C2-R4 | feature | ON | hashing | 4 | warm / HIT | Warm-path, hashing |
-| `mcs-perf/c2-r5-hash-miss` | C2-R5 | feature | ON | hashing | 4 | MISS | Hashing miss (indexed O(1)) |
+| Branch | Δ vs `master_mcs` | Cache state | Secrets/app |
+|---|---|---|---|
+| `master_mcs` | — | warm (default: capacity 5000, idle timeout 900 s) | 1 |
+| `mcs-perf/c1-r3-on-4sec` | seeds 3 extra secrets per app via SOAP `createClientSecret` (`TestData_Add_OAuth_Client_Secrets.jmx`) | warm | 4 |
+| `mcs-perf/cache-miss-partial` | toml `[cache.app_info_cache] capacity="57"` | ~90% miss (approximate — measure it) | 1 |
+| `mcs-perf/cache-miss-full` | toml `[cache.app_info_cache] enable=false` | 100% miss (deterministic) | 1 |
 
-**Config levers each branch sets (in `deployment.toml` / data setup)**
+**Run matrix (Category 1)**
 
-- **Feature flag:** `oauth.multiple_client_secrets.enable` (and `secret_count`).
-- **Persistence mode:** plaintext (raw-pack default, used for the baseline and Category 1),
-  encryption, or client-secret hashing (Category 2).
-- **Secrets per app:** seed 1 or 4 secrets per app during data setup.
-- **Cache state:** `AppInfoCache` capacity/timeout — *warm* = default (capacity 10000, no TTL);
-  *miss* = capacity set below the 1000-app population to force eviction.
+| Run | Harness branch | Pack |
+|---|---|---|
+| Baseline | `master_mcs` | raw (no feature) |
+| C1-R1 (flag OFF) | `master_mcs` | feature pack, `default.json` edited to `"oauth.multiple_client_secrets.enable": false` |
+| C1-R2 (ON, 1 secret) | `master_mcs` | feature pack, untouched (enable defaults to true) |
+| C1-R3 (ON, 4 secrets) | `mcs-perf/c1-r3-on-4sec` | same feature pack as C1-R2 |
 
-> Status: `master_mcs` (baseline, scenario trimmed) is ready. The `mcs-perf/*` branches are created
-> off `master_mcs`, each applying only its own `deployment.toml` / data-setup changes from the table.
+Miss runs combine a cache branch with any pack (the miss branches are pack-agnostic, so a raw-pack
+run on a miss branch gives the baseline-under-miss reference). A miss + 4-secrets combination is a
+one-commit branch layered on `mcs-perf/c1-r3-on-4sec`, cut when needed.
+
+**Why the partial-miss ratio is approximate:** the kernel cache (`CacheImpl`) does not evict on
+put. Entries accumulate to capacity × 1.75, then puts are silently dropped until a background
+cleanup task (every 30 s) LRU-evicts down to ~75% of capacity. With capacity 57 and 1000 apps,
+a mostly-frozen set of ~100 apps stays resident (~90% of requests miss), but the exact ratio
+should be read from cache statistics / DB query rates during the run, not assumed. With the cache
+disabled every request loads the app and its secret list from the DB — that branch is the
+interpretable worst case.
 
 ## Legacy Mode
 
