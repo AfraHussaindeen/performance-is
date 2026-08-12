@@ -146,7 +146,7 @@ applies when the harness toml omits a key). The harness toml deliberately sets n
 | Branch | Δ vs `master_mcs` | Cache state | Secrets/app |
 |---|---|---|---|
 | `master_mcs` | — | warm (default: capacity 5000, idle timeout 900 s) | 1 |
-| `mcs-perf/c1-r3-on-4sec` | seeds 3 extra secrets per app via SOAP `createClientSecret` (`TestData_Add_OAuth_Client_Secrets.jmx`) | warm | 4 |
+| `mcs-perf/c1-r3-on-4sec` | seeds 3 extra secrets per app via the app-mgt REST API (`TestData_Add_OAuth_Client_Secrets.jmx`: name→id lookup, then `POST …/inbound-protocols/oidc/secrets`, basic admin auth; `-JextraSecrets`, default 3) | warm | 4 |
 | `mcs-perf/warm-10sec-encrypt` | seeding script with the per-app count parameterized (`-JextraSecrets`, default 9 → 10 secrets/app); toml sets `[oauth.multiple_client_secrets]` `enable=true` / `secret_count="10"` and `[oauth.extensions] client_secret_persistence_processor` = `EncryptionDecryptionPersistenceProcessor` (client secrets encrypted, tokens unaffected) — self-contained, works with any feature pack | warm (full hit) | 10 (encrypted) |
 | `mcs-perf/cache-miss-partial` | toml `[cache.app_info_cache] capacity="57"` | ~90% miss (approximate — measure it) | 1 |
 | `mcs-perf/cache-miss-full` | toml `[cache.app_info_cache] enable=false` | 100% miss (deterministic) | 1 |
