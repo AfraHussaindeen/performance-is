@@ -178,12 +178,16 @@ grant_validator="org.wso2.carbon.identity.oauth2.grant.token.exchange.TokenExcha
 IdTokenAllowed=true
 IATValidityPeriod="86400"
 
-# Warm-cache, 10 secrets/app, encrypted client secrets. AppInfoCache stays at
-# defaults (all requests are cache hits after warmup). The encryption processor
-# applies to client secrets only; token persistence is unaffected.
+# No-cache, 10 secrets/app, encrypted client secrets. AppInfoCache is disabled,
+# so every token request loads the app and its encrypted secret list from the
+# DB (100% miss — the decrypt-on-load cost is paid per request). The encryption
+# processor applies to client secrets only; token persistence is unaffected.
 [oauth.multiple_client_secrets]
 enable=true
 secret_count="10"
 
 [oauth.extensions]
 client_secret_persistence_processor="org.wso2.carbon.identity.oauth.tokenprocessor.EncryptionDecryptionPersistenceProcessor"
+
+[cache.app_info_cache]
+enable=false
