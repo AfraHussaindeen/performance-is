@@ -177,3 +177,10 @@ grant_validator="org.wso2.carbon.identity.oauth2.grant.token.exchange.TokenExcha
 [oauth.custom_grant_type.properties]
 IdTokenAllowed=true
 IATValidityPeriod="86400"
+
+# Warm-cache, 1 secret/app (registration secret only, no seeding), encrypted
+# client secrets. Feature flag comes from the pack's default.json. AppInfoCache
+# stays at defaults (all requests are cache hits after warmup). The encryption
+# processor applies to client secrets only; token persistence is unaffected.
+[oauth.extensions]
+client_secret_persistence_processor="org.wso2.carbon.identity.oauth.tokenprocessor.EncryptionDecryptionPersistenceProcessor"
